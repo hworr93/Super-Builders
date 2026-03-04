@@ -1,6 +1,232 @@
-diff -ruN clean/kernel/supercalls.c work/kernel/supercalls.c
---- a/kernel/supercalls.c	2026-03-02 18:36:28.895068295 +0100
-+++ b/kernel/supercalls.c	2026-03-03 19:26:43.515530216 +0100
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/allowlist.c work/kernel/allowlist.c
+--- clean/kernel/allowlist.c	2026-03-02 18:36:28.893397179 +0100
++++ work/kernel/allowlist.c	2026-03-04 22:21:01.152185284 +0100
+@@ -449,7 +449,7 @@
+         goto put_task;
+     }
+     cb->func = do_persistent_allow_list;
+-    if (task_work_add(tsk, cb, TWA_RESUME)) {
++    if (task_work_add(tsk, cb, true)) {
+         kfree(cb);
+         pr_warn("save_allow_list add task_work failed\n");
+     }
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/kernel_compat.h work/kernel/kernel_compat.h
+--- clean/kernel/kernel_compat.h	2026-03-02 18:36:28.893397179 +0100
++++ work/kernel/kernel_compat.h	2026-03-04 22:21:01.140408922 +0100
+@@ -13,7 +13,7 @@
+ static long ksu_copy_from_user_retry(void *to, const void __user *from,
+                                      unsigned long count)
+ {
+-    long ret = copy_from_user_nofault(to, from, count);
++    long ret = probe_user_read(to, from, count);
+     if (likely(!ret))
+         return ret;
+ 
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/kernel_umount.c work/kernel/kernel_umount.c
+--- clean/kernel/kernel_umount.c	2026-03-02 18:36:28.893397179 +0100
++++ work/kernel/kernel_umount.c	2026-03-04 22:21:01.161243586 +0100
+@@ -141,7 +141,7 @@
+ 
+     tw->cb.func = umount_tw_func;
+ 
+-    int err = task_work_add(current, &tw->cb, TWA_RESUME);
++    int err = task_work_add(current, &tw->cb, true);
+     if (err) {
+         kfree(tw);
+         pr_warn("unmount add task_work failed\n");
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/ksud.c work/kernel/ksud.c
+--- clean/kernel/ksud.c	2026-03-02 18:36:28.894321225 +0100
++++ work/kernel/ksud.c	2026-03-04 22:21:01.167936198 +0100
+@@ -204,7 +204,7 @@
+     if (!p || IS_ERR(p))
+         goto fail;
+ 
+-    if (strncpy_from_user_nofault(buf, p, buf_len) <= 0)
++    if (strncpy_from_unsafe_user(buf, p, buf_len) <= 0)
+         goto fail;
+ 
+     buf[buf_len - 1] = '\0';
+@@ -264,7 +264,7 @@
+             struct task_struct *init_task =
+                 rcu_dereference(current->real_parent);
+             if (init_task)
+-                task_work_add(init_task, &on_post_fs_data_cb, TWA_RESUME);
++                task_work_add(init_task, &on_post_fs_data_cb, true);
+             rcu_read_unlock();
+             first_zygote = false;
+             stop_execve_hook();
+@@ -494,9 +494,9 @@
+     fn = (const char __user *)addr;
+ 
+     memset(path, 0, sizeof(path));
+-    ret = strncpy_from_user_nofault(path, fn, 32);
++    ret = strncpy_from_unsafe_user(path, fn, 32);
+     if (ret < 0 && try_set_access_flag(addr)) {
+-        ret = strncpy_from_user_nofault(path, fn, 32);
++        ret = strncpy_from_unsafe_user(path, fn, 32);
+     }
+     if (ret < 0) {
+         pr_err("Access filename failed for execve_handler_pre\n");
+@@ -545,10 +545,10 @@
+     if (statbuf) {
+         void __user *st_size_ptr = statbuf + offsetof(struct stat, st_size);
+         long size, new_size;
+-        if (!copy_from_user_nofault(&size, st_size_ptr, sizeof(long))) {
++        if (!probe_user_read(&size, st_size_ptr, sizeof(long))) {
+             new_size = size + ksu_rc_len;
+             pr_info("adding ksu_rc_len: %ld -> %ld", size, new_size);
+-            if (!copy_to_user_nofault(st_size_ptr, &new_size, sizeof(long))) {
++            if (!probe_user_write(st_size_ptr, &new_size, sizeof(long))) {
+                 pr_info("added ksu_rc_len");
+             } else {
+                 pr_err("add ksu_rc_len failed: statbuf 0x%lx",
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/pkg_observer.c work/kernel/pkg_observer.c
+--- clean/kernel/pkg_observer.c	2026-03-02 18:36:28.894840697 +0100
++++ work/kernel/pkg_observer.c	2026-03-04 22:21:35.929835620 +0100
+@@ -22,9 +22,10 @@
+ 
+ static struct fsnotify_group *g;
+ 
+-static int ksu_handle_inode_event(struct fsnotify_mark *mark, u32 mask,
+-                                  struct inode *inode, struct inode *dir,
+-                                  const struct qstr *file_name, u32 cookie)
++static int ksu_handle_event(struct fsnotify_group *group, struct inode *inode,
++                            u32 mask, const void *data, int data_type,
++                            const struct qstr *file_name, u32 cookie,
++                            struct fsnotify_iter_info *iter_info)
+ {
+     if (!file_name)
+         return 0;
+@@ -38,7 +39,7 @@
+ }
+ 
+ static const struct fsnotify_ops ksu_ops = {
+-    .handle_inode_event = ksu_handle_inode_event,
++    .handle_event = ksu_handle_event,
+ };
+ 
+ static int add_mark_on_inode(struct inode *inode, u32 mask,
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/selinux/sepolicy.c work/kernel/selinux/sepolicy.c
+--- clean/kernel/selinux/sepolicy.c	2026-03-02 18:36:28.895068295 +0100
++++ work/kernel/selinux/sepolicy.c	2026-03-04 22:22:06.809468797 +0100
+@@ -507,6 +507,7 @@
+         return false;
+     }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+     struct filename_trans_key key;
+     key.ttype = tgt->value;
+     key.tclass = cls->value;
+@@ -514,10 +515,14 @@
+ 
+     struct filename_trans_datum *last = NULL;
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+     struct filename_trans_datum *trans = policydb_filenametr_search(db, &key);
++#else
++    struct filename_trans_datum *trans =
++        hashtab_search(&db->filename_trans, &key);
++#endif
+     while (trans) {
+         if (ebitmap_get_bit(&trans->stypes, src->value - 1)) {
+-            // Duplicate, overwrite existing data and return
+             trans->otype = def->value;
+             return true;
+         }
+@@ -542,6 +547,32 @@
+ 
+     db->compat_filename_trans_count++;
+     return ebitmap_set_bit(&trans->stypes, src->value - 1, 1) == 0;
++#else
++    struct filename_trans key;
++    key.ttype = tgt->value;
++    key.tclass = cls->value;
++    key.name = (char *)o;
++
++    struct filename_trans_datum *trans =
++        hashtab_search(db->filename_trans, &key);
++
++    if (trans == NULL) {
++        trans = (struct filename_trans_datum *)kcalloc(sizeof(*trans), 1,
++                                                       GFP_ATOMIC);
++        if (!trans)
++            return false;
++        struct filename_trans *new_key =
++            (struct filename_trans *)kzalloc(sizeof(*new_key), GFP_ATOMIC);
++        if (!new_key)
++            return false;
++        *new_key = key;
++        new_key->name = kstrdup(key.name, GFP_ATOMIC);
++        trans->otype = def->value;
++        hashtab_insert(db->filename_trans, new_key, trans);
++    }
++
++    return ebitmap_set_bit(&db->filename_trans_ttypes, src->value - 1, 1) == 0;
++#endif
+ }
+ 
+ static bool add_genfscon(struct policydb *db, const char *fs_name,
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/setuid_hook.c work/kernel/setuid_hook.c
+--- clean/kernel/setuid_hook.c	2026-03-02 18:36:28.895068295 +0100
++++ work/kernel/setuid_hook.c	2026-03-04 22:21:01.175720818 +0100
+@@ -47,7 +47,7 @@
+         if (!cb)
+             return 0;
+         cb->func = ksu_install_manager_fd_tw_func;
+-        if (task_work_add(current, cb, TWA_RESUME)) {
++        if (task_work_add(current, cb, true)) {
+             kfree(cb);
+             pr_warn("install manager fd add task_work failed\n");
+         }
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/su_mount_ns.c work/kernel/su_mount_ns.c
+--- clean/kernel/su_mount_ns.c	2026-03-02 18:36:28.895068295 +0100
++++ work/kernel/su_mount_ns.c	2026-03-04 22:21:01.182274948 +0100
+@@ -201,7 +201,7 @@
+     }
+     tw->cb.func = ksu_setup_mount_ns_tw_func;
+     tw->ns_mode = ns_mode;
+-    if (task_work_add(current, &tw->cb, TWA_RESUME)) {
++    if (task_work_add(current, &tw->cb, true)) {
+         kfree(tw);
+         pr_err("add task work failed! skip mnt_ns magic for pid: %d.\n",
+                current->pid);
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/sucompat.c work/kernel/sucompat.c
+--- clean/kernel/sucompat.c	2026-03-02 18:36:28.895068295 +0100
++++ work/kernel/sucompat.c	2026-03-04 22:21:01.126739287 +0100
+@@ -80,7 +80,7 @@
+ 
+     char path[sizeof(su) + 1];
+     memset(path, 0, sizeof(path));
+-    strncpy_from_user_nofault(path, *filename_user, sizeof(path));
++    strncpy_from_unsafe_user(path, *filename_user, sizeof(path));
+ 
+     if (unlikely(!memcmp(path, su, sizeof(su)))) {
+         pr_info("faccessat su->sh!\n");
+@@ -105,7 +105,7 @@
+ 
+     char path[sizeof(su) + 1];
+     memset(path, 0, sizeof(path));
+-    strncpy_from_user_nofault(path, *filename_user, sizeof(path));
++    strncpy_from_unsafe_user(path, *filename_user, sizeof(path));
+ 
+     if (unlikely(!memcmp(path, su, sizeof(su)))) {
+         pr_info("newfstatat su->sh!\n");
+@@ -136,10 +136,10 @@
+     addr = untagged_addr((unsigned long)*filename_user);
+     fn = (const char __user *)addr;
+     memset(path, 0, sizeof(path));
+-    ret = strncpy_from_user_nofault(path, fn, sizeof(path));
++    ret = strncpy_from_unsafe_user(path, fn, sizeof(path));
+ 
+     if (ret < 0 && try_set_access_flag(addr)) {
+-        ret = strncpy_from_user_nofault(path, fn, sizeof(path));
++        ret = strncpy_from_unsafe_user(path, fn, sizeof(path));
+     }
+ 
+     if (ret < 0 && preempt_count()) {
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/supercalls.c work/kernel/supercalls.c
+--- clean/kernel/supercalls.c	2026-03-02 18:36:28.895068295 +0100
++++ work/kernel/supercalls.c	2026-03-04 22:23:09.628722559 +0100
 @@ -345,7 +345,9 @@
      ret = ksu_set_app_profile(&cmd.profile);
      if (!ret) {
@@ -25,5 +251,29 @@ diff -ruN clean/kernel/supercalls.c work/kernel/supercalls.c
 -        pr_err("nuke ext4 mnt path too long\\n");
 +        pr_err("nuke ext4 mnt path too long\n");
          return -ENAMETOOLONG;
+     }
+ 
+@@ -947,7 +949,7 @@
+         tw->outp = (int __user *)*arg;
+         tw->cb.func = ksu_install_fd_tw_func;
+ 
+-        if (task_work_add(current, &tw->cb, TWA_RESUME)) {
++        if (task_work_add(current, &tw->cb, true)) {
+             kfree(tw);
+             pr_warn("install fd add task_work failed\n");
+         }
+diff '--color=auto' -ruN '--exclude=.git' clean/kernel/syscall_hook_manager.c work/kernel/syscall_hook_manager.c
+--- clean/kernel/syscall_hook_manager.c	2026-03-02 18:36:28.895068295 +0100
++++ work/kernel/syscall_hook_manager.c	2026-03-04 22:21:01.132909326 +0100
+@@ -263,9 +263,9 @@
+     fn = (const char __user *)addr;
+ 
+     memset(path, 0, sizeof(path));
+-    ret = strncpy_from_user_nofault(path, fn, sizeof(path));
++    ret = strncpy_from_unsafe_user(path, fn, sizeof(path));
+     if (ret < 0 && try_set_access_flag(addr)) {
+-        ret = strncpy_from_user_nofault(path, fn, sizeof(path));
++        ret = strncpy_from_unsafe_user(path, fn, sizeof(path));
+         pr_info("ksu_handle_init_mark_tracker: %ld\n", ret);
      }
  
