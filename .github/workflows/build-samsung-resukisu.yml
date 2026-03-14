@@ -292,6 +292,8 @@ jobs:
           echo "Pinned ReSukiSU to $(git rev-parse --short=7 HEAD)"
         fi
 
+        cd "$KERNEL_COMMON"
+
         # SukiSU upstream bugs: syscall_handler.o not in Kbuild, vmalloc.h guarded by SUSFS ifdef
         KBUILD="drivers/kernelsu/Kbuild"
         if [ -f "$KBUILD" ] && [ -f "drivers/kernelsu/syscall_handler.c" ] && ! grep -q "syscall_handler" "$KBUILD"; then
