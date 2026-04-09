@@ -413,14 +413,7 @@ jobs:
           fi
           # Fix depmod -d flag unsupported on older kmod
           mkdir -p "$HOME/bin"
-          cat > "$HOME/bin/depmod" << 'DEPMOD_WRAPPER'
-#!/bin/sh
-args=""
-for arg in "$@"; do
-  case "$arg" in -d) continue ;; *) args="$args $arg" ;; esac
-done
-exec /usr/sbin/depmod $args
-DEPMOD_WRAPPER
+          printf '#!/bin/sh\nfor a in "$@"; do case "$a" in -d) continue;; *) set -- "$@" "$a";; esac; shift; done\nexec /usr/sbin/depmod "$@"\n' > "$HOME/bin/depmod"
           chmod +x "$HOME/bin/depmod"
           export PATH="$HOME/bin:$PATH"
           tools/bazel build --config=fast --lto=$LTO_MODE --defconfig_fragment=//common:arch/arm64/configs/sukisu_gki.fragment //common:kernel_aarch64_dist || BUILD_RC=$?
