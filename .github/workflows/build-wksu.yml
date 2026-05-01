@@ -201,6 +201,33 @@ jobs:
       run: |
         FIX_SCRIPT="$GITHUB_WORKSPACE/$VERSION_DIR/build-helpers/fix-old-kernel-compat.sh"
         [ -f "$FIX_SCRIPT" ] && bash "$FIX_SCRIPT" "$KERNEL_ROOT/common" "$SUBLEVEL" || true
+        
+    - name: Apply All Patches from WildKSU/Patches
+      working-directory: ${{ env.KERNEL_ROOT }}/common
+      run: |
+        PATCH_DIR="$GITHUB_WORKSPACE/android15-6.6/WildKSU/patches"
+        
+        # Check if the directory exists to avoid Errors
+        if [ -d "$PATCH_DIR" ]; then
+          echo "Applying patches from $PATCH_DIR..."
+          
+          # Use nullglob to handle cases where no .patch files exist
+          shopt -s nullglob
+          for p in "$PATCH_DIR"/*.patch; do
+            echo "Applying patch: $(basename "$P")"
+            
+            # Dry run first to ensure it applies cleanly
+            if patch --dry-run -p1 -F3 --no-backup-if-mismatch < "$p" >/dev/null; then
+              patch -p1 -F3 --no-backup-if-mismatch < "$p"
+            else
+              echo "::warning::skipping patch $(basename "$p") (does not apply cleanly)"
+              
+            fi
+          done
+          shopt -u nullglob
+        else
+          echo "Patch directory $PATCH_DIR not found."
+        fi
 
     - name: Apply Upstream SUSFS Patch
       if: inputs.add_susfs
